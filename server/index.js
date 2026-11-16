@@ -17,6 +17,7 @@ const PRIOR_CLICKS = 10;    // smoothing so a store isn't judged on a handful of
 const PRIOR_CR = 0.1;
 const SWITCH_MARGIN = 0.02; // a store must beat the active one by 2 points to take over
 const MIN_STORE_CLICKS = 3; // ...and have enough recent clicks to trust the number
+const MIN_DWELL_MS = Number(process.env.MIN_DWELL_SECONDS || 8) * 1000; // wait this long between learned switches so a link doesn't flip-flop. Stock-outs ignore it.
 
 let state;
 let eventId = 0;
@@ -35,6 +36,7 @@ function makeLink({ title, slug, stores }) {
     stores: stores.map((s) => s.id),
     urls: Object.fromEntries(stores.map((s) => [s.id, s.url])),
     active: stores[0].id, // first store = the "fixed link" default for the comparison
+    lastSwitch: 0,
     stats: Object.fromEntries(stores.map((s) => [s.id, emptyStats()])),
   };
 }
@@ -115,6 +117,7 @@ function pickStore(link) {
 function reroute(link, to, reason) {
   const from = link.active;
   link.active = to;
+  link.lastSwitch = Date.now();
   state.totals.reroutes++;
   emit({ type: 'reroute', reason, linkId: link.id, linkTitle: link.title, from, to,
          fromName: store(from).name, toName: store(to).name,
@@ -131,7 +134,7 @@ function evaluate(link) {
   }
   const best = avail.reduce((a, b) => (recentCr(link.stats[b]) > recentCr(link.stats[a]) ? b : a));
   if (state.unavailable[link.active]) return reroute(link, best, 'stock');
-  if (best !== link.active && link.stats[best].wClicks >= MIN_STORE_CLICKS &&
+  if (best !== link.active && link.stats[best].wClicks >= MIN_STORE_CLICKS && Date.now() - link.lastSwitch >= MIN_DWELL_MS &&
       recentCr(link.stats[best]) - recentCr(link.stats[link.active]) > SWITCH_MARGIN) {
     reroute(link, best, 'rate');
   }
