@@ -52,3 +52,8 @@ In production the API serves the built dashboard and, with `DEMO_TRAFFIC=1`, run
 Local check: `npm run build && DEMO_TRAFFIC=1 npm start` → http://localhost:4000
 
 Render: push to GitHub, then New → Blueprint → pick the repo (uses `render.yaml`).
+
+## Login
+
+Visitors click "Continue as visitor" and get a view-only dashboard. Sign in with any email plus the shared password in `DEMO_PASSWORD` (default `smartlinks` when unset) to reset data and use presenter controls.
+Set it on Render under the service's Environment tab. Sessions live in memory, so a restart signs everyone out.

@@ -11,3 +11,5 @@ services:
         value: "1"
       - key: NODE_VERSION
         value: "20"
+      - key: DEMO_PASSWORD
+        sync: false
