@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { REGIONS } from './catalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 4000;
@@ -17,42 +18,45 @@ const PRIOR_CR = 0.1;
 const SWITCH_MARGIN = 0.02; // a store must beat the active one by 2 points to take over
 const MIN_STORE_CLICKS = 3; // ...and have enough recent clicks to trust the number
 
-const STORES = {
-  amazon:  { name: 'Amazon',    commission: 0.04 },
-  bestbuy: { name: 'Best Buy',  commission: 0.05 },
-  target:  { name: 'Target',    commission: 0.06 },
-  walmart: { name: 'Walmart',   commission: 0.045 },
-  bh:      { name: 'B&H Photo', commission: 0.07 },
-};
-
-// The first store in each list is the "fixed link" default used for the without-routing comparison.
-const LINKS = [
-  { id: 'lnk_lamp',  slug: 'go.creator/arc-lamp',    title: 'Arc desk lamp',   stores: ['amazon', 'target', 'walmart'] },
-  { id: 'lnk_cam',   slug: 'go.creator/vlog-cam',    title: 'Vlog camera kit', stores: ['amazon', 'bestbuy', 'bh'] },
-  { id: 'lnk_mic',   slug: 'go.creator/podcast-mic', title: 'Podcast mic',     stores: ['amazon', 'bestbuy', 'bh', 'walmart'] },
-  { id: 'lnk_chair', slug: 'go.creator/desk-chair',  title: 'Ergonomic chair', stores: ['amazon', 'target', 'walmart'] },
-];
-
 let state;
 let eventId = 0;
 let clickCounter = 0;
+let linkCounter = 0;
 let autoEvents = true; // random flash sales / slumps from the traffic script
 let simQueue = [];     // presenter events waiting for the traffic script
 
-function reset() {
-  state = {
-    pending: new Map(),
-    unavailable: {}, // storeId -> true while out of stock
-    totals: { clicks: 0, conversions: 0, earnings: 0, baseline: 0, reroutes: 0 },
-    series: [],
-    links: LINKS.map((def) => ({
-      ...def,
-      active: def.stores[0],
-      stats: Object.fromEntries(def.stores.map((s) => [s, { clicks: 0, conversions: 0, earnings: 0, wClicks: 0, wConv: 0 }])),
-    })),
+const region = () => REGIONS[state.region];
+const store = (id) => region().stores[id];
+const emptyStats = () => ({ clicks: 0, conversions: 0, earnings: 0, wClicks: 0, wConv: 0 });
+
+function makeLink({ title, slug, stores }) {
+  return {
+    id: `lnk_${++linkCounter}`, title, slug,
+    stores: stores.map((s) => s.id),
+    urls: Object.fromEntries(stores.map((s) => [s.id, s.url])),
+    active: stores[0].id, // first store = the "fixed link" default for the comparison
+    stats: Object.fromEntries(stores.map((s) => [s.id, emptyStats()])),
   };
 }
-reset();
+
+function resetStats() {
+  state.pending = new Map();
+  state.unavailable = {};
+  state.totals = { clicks: 0, conversions: 0, earnings: 0, baseline: 0, reroutes: 0 };
+  state.series = [];
+  for (const l of state.links) {
+    l.active = l.stores[0];
+    l.stats = Object.fromEntries(l.stores.map((s) => [s, emptyStats()]));
+  }
+}
+
+function seedRegion(id) {
+  const r = REGIONS[id];
+  state = { region: id, links: r.seed.map(makeLink), connections: {} };
+  for (const l of state.links) for (const s of l.stores) state.connections[s] = r.stores[s].sampleTag;
+  resetStats();
+}
+seedRegion('us');
 
 const recentCr = (s) => (s.wConv + PRIOR_CLICKS * PRIOR_CR) / (s.wClicks + PRIOR_CLICKS);
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -72,19 +76,22 @@ function bucket() {
   return b;
 }
 
+const usedStoreIds = () => [...new Set(state.links.flatMap((l) => l.stores))];
+
 function snapshot() {
   bucket();
   return {
     type: 'snapshot',
+    region: state.region, currency: region().currency, locale: region().locale,
     totals: state.totals,
     series: state.series,
     autoEvents,
-    stores: Object.entries(STORES).map(([id, s]) => ({ id, name: s.name, outOfStock: !!state.unavailable[id] })),
+    stores: usedStoreIds().map((id) => ({ id, name: store(id).name, outOfStock: !!state.unavailable[id] })),
     links: state.links.map((l) => ({
-      id: l.id, title: l.title, slug: l.slug, active: l.active,
+      id: l.id, title: l.title, slug: `go.creator/${l.slug}`, active: l.active,
       stores: l.stores.map((id) => {
         const s = l.stats[id];
-        return { id, name: STORES[id].name, clicks: s.clicks, conversions: s.conversions, earnings: s.earnings,
+        return { id, name: store(id).name, clicks: s.clicks, conversions: s.conversions, earnings: s.earnings,
                  recentCr: recentCr(s), outOfStock: !!state.unavailable[id] };
       }),
     })),
@@ -105,7 +112,7 @@ function reroute(link, to, reason) {
   link.active = to;
   state.totals.reroutes++;
   emit({ type: 'reroute', reason, linkId: link.id, linkTitle: link.title, from, to,
-         fromName: STORES[from].name, toName: STORES[to].name,
+         fromName: store(from).name, toName: store(to).name,
          fromCr: recentCr(link.stats[from]), toCr: recentCr(link.stats[to]) });
 }
 
@@ -126,7 +133,7 @@ app.set('trust proxy', 1);
 app.use(express.json());
 
 // --- auth (one shared demo password, sessions kept in memory) ---
-const sessions = new Map(); // token -> { email }
+const sessions = new Map();
 const COOKIE = 'sl_session';
 const readCookie = (req) =>
   (req.headers.cookie || '').split(';').map((c) => c.trim().split('=')).find(([k]) => k === COOKIE)?.[1];
@@ -140,7 +147,7 @@ function requireAuth(req, res, next) {
   req.user = session;
   next();
 }
-// Visitors can watch; only password users can reset or trigger events
+// Visitors can watch; only password users can change anything
 function requireOwner(req, res, next) {
   requireAuth(req, res, () => {
     if (req.user.role !== 'owner') return res.status(403).json({ error: 'Visitors can’t change the demo' });
@@ -193,7 +200,7 @@ app.post('/api/click', (req, res) => {
   if (state.pending.size > 5000) state.pending.delete(state.pending.keys().next().value);
 
   evaluate(link);
-  res.json({ clickId, storeId, explore });
+  res.json({ clickId, storeId, explore, url: link.urls[storeId] });
 });
 
 app.post('/api/conversion', (req, res) => {
@@ -202,32 +209,131 @@ app.post('/api/conversion', (req, res) => {
   state.pending.delete(req.body.clickId);
 
   const link = state.links.find((l) => l.id === click.linkId);
+  if (!link || !link.stats[click.storeId]) return res.status(410).json({ error: 'Link was changed or removed' });
   const st = link.stats[click.storeId];
-  const commission = round2(Number(req.body.orderValue || 0) * STORES[click.storeId].commission);
+  const commission = round2(Number(req.body.orderValue || 0) * store(click.storeId).commission);
   st.conversions++; st.wConv++; st.earnings += commission;
   state.totals.conversions++; state.totals.earnings += commission; bucket().conversions++;
 
   emit({ type: 'conversion', linkId: link.id, linkTitle: link.title, storeId: click.storeId,
-         storeName: STORES[click.storeId].name, commission });
+         storeName: store(click.storeId).name, commission });
   evaluate(link);
   res.json({ ok: true, commission });
 });
 
-app.post('/api/reset', requireOwner, (_req, res) => { reset(); simQueue = []; emit({ type: 'reset' }); res.json({ ok: true }); });
+app.post('/api/reset', requireOwner, (_req, res) => { resetStats(); simQueue = []; emit({ type: 'reset' }); res.json({ ok: true }); });
+
+// --- setup: region, affiliate connections, links ---
+function config() {
+  const used = new Set(usedStoreIds());
+  return {
+    region: state.region,
+    regions: Object.entries(REGIONS).map(([id, r]) => ({ id, label: r.label })),
+    currency: region().currency,
+    catalog: Object.entries(region().stores).map(([id, s]) => ({
+      id, name: s.name, program: s.program, network: s.network, commission: s.commission, domains: s.domains,
+      tagLabel: s.tagLabel, tagExample: s.sampleTag, connected: id in state.connections, tag: state.connections[id] || null,
+      inUse: used.has(id),
+    })),
+    links: state.links.map((l) => ({ id: l.id, title: l.title, slug: l.slug,
+                                     stores: l.stores.map((id) => ({ id, url: l.urls[id] })) })),
+  };
+}
+
+function validLink(body, exceptId) {
+  const title = String(body?.title || '').trim();
+  const slug = String(body?.slug || '').trim().toLowerCase();
+  const stores = Array.isArray(body?.stores) ? body.stores : [];
+  if (!title) return { error: 'Add a product name.' };
+  if (!/^[a-z0-9-]{2,40}$/.test(slug)) return { error: 'Short link name can use lowercase letters, numbers and dashes (2 to 40 characters).' };
+  if (state.links.some((l) => l.slug === slug && l.id !== exceptId)) return { error: `go.creator/${slug} is already taken.` };
+  if (stores.length < 2) return { error: 'Add at least two stores so the link has somewhere to switch to.' };
+  const seen = new Set();
+  for (const s of stores) {
+    if (!store(s.id)) return { error: 'One of the stores isn’t available in this region.' };
+    if (!(s.id in state.connections)) return { error: `Connect ${store(s.id).name} before adding it to a link.` };
+    if (seen.has(s.id)) return { error: `${store(s.id).name} is listed twice.` };
+    seen.add(s.id);
+    try { if (!/^https?:$/.test(new URL(s.url).protocol)) throw 0; }
+    catch { return { error: `Add a valid product page for ${store(s.id).name}, starting with https://` }; }
+  }
+  return { title, slug, stores: stores.map((s) => ({ id: s.id, url: s.url.trim() })) };
+}
+
+app.get('/api/config', requireOwner, (_req, res) => res.json(config()));
+
+app.post('/api/region', requireOwner, (req, res) => {
+  if (!REGIONS[req.body?.region]) return res.status(400).json({ error: 'Unknown region' });
+  seedRegion(req.body.region);
+  simQueue = [];
+  emit({ type: 'reset' });
+  send(snapshot());
+  res.json(config());
+});
+
+app.post('/api/connections', requireOwner, (req, res) => {
+  const { storeId } = req.body || {};
+  const tag = String(req.body?.tag || '').trim();
+  if (!store(storeId)) return res.status(400).json({ error: 'Unknown store' });
+  if (tag.length < 3) return res.status(400).json({ error: `Enter your ${store(storeId).tagLabel}.` });
+  state.connections[storeId] = tag;
+  res.json(config());
+});
+
+app.delete('/api/connections/:storeId', requireOwner, (req, res) => {
+  const id = req.params.storeId;
+  const using = state.links.filter((l) => l.stores.includes(id));
+  if (using.length) {
+    return res.status(409).json({ error: `${store(id).name} is used by ${using.length} link${using.length > 1 ? 's' : ''}. Remove it from ${using.length > 1 ? 'them' : 'it'} first.` });
+  }
+  delete state.connections[id];
+  res.json(config());
+});
+
+app.post('/api/links', requireOwner, (req, res) => {
+  const v = validLink(req.body);
+  if (v.error) return res.status(400).json(v);
+  state.links.push(makeLink(v));
+  send(snapshot());
+  res.json(config());
+});
+
+app.put('/api/links/:id', requireOwner, (req, res) => {
+  const link = state.links.find((l) => l.id === req.params.id);
+  if (!link) return res.status(404).json({ error: 'That link no longer exists.' });
+  const v = validLink(req.body, link.id);
+  if (v.error) return res.status(400).json(v);
+  link.title = v.title;
+  link.slug = v.slug;
+  link.stores = v.stores.map((s) => s.id);
+  link.urls = Object.fromEntries(v.stores.map((s) => [s.id, s.url]));
+  link.stats = Object.fromEntries(link.stores.map((id) => [id, link.stats[id] || emptyStats()]));
+  if (!link.stores.includes(link.active)) link.active = link.stores[0];
+  send(snapshot());
+  res.json(config());
+});
+
+app.delete('/api/links/:id', requireOwner, (req, res) => {
+  const i = state.links.findIndex((l) => l.id === req.params.id);
+  if (i < 0) return res.status(404).json({ error: 'That link no longer exists.' });
+  state.links.splice(i, 1);
+  send(snapshot());
+  res.json(config());
+});
 
 // --- demo simulation controls ---
 // What a fixed link (always the first store) would have earned for the same click.
 app.post('/api/sim/baseline', (req, res) => {
   const link = state.links.find((l) => l.id === req.body?.linkId);
   if (!link) return res.status(404).json({ error: 'Unknown linkId' });
-  state.totals.baseline += round2(Number(req.body.orderValue || 0) * STORES[link.stores[0]].commission);
+  state.totals.baseline += round2(Number(req.body.orderValue || 0) * store(link.stores[0]).commission);
   res.json({ ok: true });
 });
 
 // Presenter events: flash | slump | outage | restock
 app.post('/api/sim/event', requireOwner, (req, res) => {
   const { kind, storeId } = req.body || {};
-  if (!STORES[storeId] || !['flash', 'slump', 'outage', 'restock'].includes(kind)) {
+  if (!store(storeId) || !['flash', 'slump', 'outage', 'restock'].includes(kind)) {
     return res.status(400).json({ error: 'Need kind (flash, slump, outage, restock) and a valid storeId' });
   }
   simQueue.push({ kind, storeId });
@@ -242,8 +348,15 @@ app.post('/api/sim/event', requireOwner, (req, res) => {
 
 app.post('/api/sim/auto', requireOwner, (req, res) => { autoEvents = !!req.body?.on; send(snapshot()); res.json({ autoEvents }); });
 
-// Polled by traffic.js
-app.get('/api/sim/poll', (_req, res) => { res.json({ events: simQueue, autoEvents }); simQueue = []; });
+// Polled by traffic.js: queued presenter events plus the current link list
+app.get('/api/sim/poll', (_req, res) => {
+  res.json({
+    events: simQueue, autoEvents, region: state.region, orderRange: region().orderRange,
+    links: state.links.map((l) => ({ id: l.id, stores: l.stores })),
+    storeNames: Object.fromEntries(Object.entries(region().stores).map(([id, s]) => [id, s.name])),
+  });
+  simQueue = [];
+});
 
 // --- serve the built dashboard (production) ---
 const dist = path.join(__dirname, '../client/dist');

@@ -57,3 +57,10 @@ Render: push to GitHub, then New → Blueprint → pick the repo (uses `render.y
 
 Visitors click "Continue as visitor" and get a view-only dashboard. Sign in with any email plus the shared password in `DEMO_PASSWORD` (default `smartlinks` when unset) to reset data and use presenter controls.
 Set it on Render under the service's Environment tab. Sessions live in memory, so a restart signs everyone out.
+
+## Setup screens (owner only)
+
+- **Connections:** connect each store's affiliate program by entering your tracking ID. Switch the demo region between United States ($) and India (₹); each has its own stores and sample links. Store list lives in `server/catalog.js`.
+- **Links:** create, edit and delete smart links; import the affiliate links a creator already uses (store is detected from the URL, or picked manually for Linktree, Wishlink, LTK or bit.ly links).
+
+Everything is kept in memory, so links and connections go back to the sample set when the server restarts.

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
-import { Close, ConfirmDialog, Logo, Sliders, Spinner, ThemeSegmented, ThemeToggle } from './ui.jsx';
+import { Close, ConfirmDialog, Logo, Sliders, Spinner, ThemeSegmented, ThemeToggle, money } from './ui.jsx';
+import { ConnectionsPage, LinksPage, useConfig } from './Setup.jsx';
 
-const money = (n) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
 const pct = (n) => `${(n * 100).toFixed(1)}%`;
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const cssVar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -27,6 +27,15 @@ export default function Dashboard({ user, theme, setTheme, toast, onSignedOut })
   const [confirm, setConfirm] = useState(null); // 'reset' | 'signout'
   const [busy, setBusy] = useState(false);
   const owner = user.role === 'owner';
+  const tabFromHash = () => (owner && ['links', 'connections'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'dashboard');
+  const [tab, setTab] = useState(tabFromHash);
+  const goTo = useCallback((t) => { location.hash = t === 'dashboard' ? '' : t; setTab(t); scrollTo(0, 0); }, []);
+  useEffect(() => {
+    const onHash = () => setTab(tabFromHash());
+    addEventListener('hashchange', onHash);
+    return () => removeEventListener('hashchange', onHash);
+  }, []);
+  const cfgState = useConfig(owner, snap?.region, onSignedOut);
 
   // Live stream
   useEffect(() => {
@@ -104,12 +113,22 @@ export default function Dashboard({ user, theme, setTheme, toast, onSignedOut })
                            : postJson('/api/logout').catch(() => {}).finally(onSignedOut))} />
           </div>
         </div>
+        {owner && (
+          <div className="tabs" role="tablist" aria-label="Sections">
+            {[['dashboard', 'Dashboard'], ['links', 'Links'], ['connections', 'Connections']].map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => goTo(id)}>{label}</button>
+            ))}
+          </div>
+        )}
       </nav>
 
       {!snap ? (
         <div className="splash"><Spinner size={28} /><p className="muted">Connecting to live data</p></div>
       ) : (
-        <Content snap={snap} reroutes={reroutes} sales={sales} rerouted={rerouted} onReset={owner ? () => setConfirm('reset') : null} />
+        tab === 'links' ? <LinksPage snap={snap} cfgState={cfgState} toast={toast} goTo={goTo} />
+        : tab === 'connections' ? <ConnectionsPage cfgState={cfgState} toast={toast} />
+        : <Content snap={snap} reroutes={reroutes} sales={sales} rerouted={rerouted}
+                   onReset={owner ? () => setConfirm('reset') : null} onManage={owner ? () => goTo('links') : null} />
       )}
 
       {owner && presenter && snap && <PresenterSheet snap={snap} toast={toast} onClose={() => setPresenter(false)} onSignedOut={onSignedOut} />}
@@ -162,8 +181,9 @@ function AccountMenu({ user, theme, setTheme, onReset, onSignOut }) {
   );
 }
 
-function Content({ snap, reroutes, sales, rerouted, onReset }) {
+function Content({ snap, reroutes, sales, rerouted, onReset, onManage }) {
   const { totals, links, series } = snap;
+  const fmt = (n) => money(n, snap.currency, snap.locale);
   const cr = totals.clicks ? totals.conversions / totals.clicks : 0;
   const lift = totals.baseline > 0 ? (totals.earnings - totals.baseline) / totals.baseline : null;
 
@@ -180,9 +200,9 @@ function Content({ snap, reroutes, sales, rerouted, onReset }) {
       <dl className="metrics">
         <Metric label="Clicks" value={totals.clicks.toLocaleString()} />
         <Metric label="Conversion rate" value={pct(cr)} />
-        <Metric label="Earnings" value={money(totals.earnings)}
+        <Metric label="Earnings" value={fmt(totals.earnings)}
           note={lift === null ? 'Comparing with fixed links…' : (
-            <><strong className={lift >= 0 ? 'up' : 'down'}>{lift >= 0 ? '+' : ''}{(lift * 100).toFixed(0)}%</strong> vs {money(totals.baseline)} with fixed links</>
+            <><strong className={lift >= 0 ? 'up' : 'down'}>{lift >= 0 ? '+' : ''}{(lift * 100).toFixed(0)}%</strong> vs {fmt(totals.baseline)} with fixed links</>
           )} />
         <Metric label="Reroutes" value={totals.reroutes} accent />
       </dl>
@@ -229,7 +249,7 @@ function Content({ snap, reroutes, sales, rerouted, onReset }) {
           {sales.length === 0 ? <p className="muted small">Sales appear here as they come in.</p> : (
             <ol className="sales">
               {sales.map((e) => (
-                <li key={e.id}><span>{e.linkTitle} at {e.storeName}</span><span className="amount">+{money(e.commission)}</span></li>
+                <li key={e.id}><span>{e.linkTitle} at {e.storeName}</span><span className="amount">+{fmt(e.commission)}</span></li>
               ))}
             </ol>
           )}
@@ -237,10 +257,15 @@ function Content({ snap, reroutes, sales, rerouted, onReset }) {
       </section>
 
       <section>
-        <h2 className="section-title">Active links</h2>
-        <div className="links">
-          {links.map((l) => <LinkCard key={l.id} link={l} justRerouted={Date.now() - (rerouted[l.id] || 0) < 4000} />)}
+        <div className="section-head">
+          <h2 className="section-title">Active links</h2>
+          {onManage && <button className="btn btn-gray btn-small" onClick={onManage}>Manage links</button>}
         </div>
+        {links.length === 0 ? <p className="muted">No links yet.{onManage && ' Create one under Links.'}</p> : (
+          <div className="links">
+            {links.map((l) => <LinkCard key={l.id} link={l} fmt={fmt} justRerouted={Date.now() - (rerouted[l.id] || 0) < 4000} />)}
+          </div>
+        )}
       </section>
     </main>
   );
@@ -306,7 +331,7 @@ function Metric({ label, value, accent, note }) {
   );
 }
 
-function LinkCard({ link, justRerouted }) {
+function LinkCard({ link, justRerouted, fmt }) {
   const sum = (k) => link.stores.reduce((a, s) => a + s[k], 0);
   const clicks = sum('clicks');
   const active = link.stores.find((s) => s.id === link.active);
@@ -332,7 +357,7 @@ function LinkCard({ link, justRerouted }) {
       <dl className="link-stats">
         <div><dt>Clicks</dt><dd>{clicks.toLocaleString()}</dd></div>
         <div><dt>Conv. rate</dt><dd>{pct(clicks ? sum('conversions') / clicks : 0)}</dd></div>
-        <div><dt>Earned</dt><dd>{money(sum('earnings'))}</dd></div>
+        <div><dt>Earned</dt><dd>{fmt(sum('earnings'))}</dd></div>
       </dl>
     </article>
   );

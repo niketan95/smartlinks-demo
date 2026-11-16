@@ -108,3 +108,31 @@ export const Logo = ({ size = 28 }) => (
     <path d="M7 16h7l5-6h6M14 16l5 6h6" stroke="#fff" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+
+// ---------- modal sheet ----------
+export function Modal({ title, onClose, children, footer, wide, busy }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) onClose(); };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [onClose, busy]);
+  return (
+    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
+      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-head">
+          <h2>{title}</h2>
+          <button className="icon-btn" onClick={onClose} disabled={busy} aria-label="Close"><Close /></button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-foot">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+export const money = (n, currency = 'USD', locale = 'en-US') =>
+  n.toLocaleString(locale, { style: 'currency', currency, maximumFractionDigits: currency === 'INR' ? 0 : 2 });
+
+export const Plus = () => <Svg><path d="M12 5v14M5 12h14" /></Svg>;
+export const Copy = () => <Svg size={16}><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V6a2 2 0 0 1 2-2h9" /></Svg>;
+export const Trash = () => <Svg size={16}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></Svg>;
