@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: smartlinks-demo
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /api/state
+    envVars:
+      - key: DEMO_TRAFFIC
+        value: "1"
+      - key: NODE_VERSION
+        value: "20"
