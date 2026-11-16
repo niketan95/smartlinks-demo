@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { Eye, EyeOff, Logo, Spinner, ThemeToggle } from './ui.jsx';
+import HeroRoute from './Hero.jsx';
 
 export default function Login({ theme, setTheme, onSignedIn }) {
-  const [visiting, setVisiting] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [visiting, setVisiting] = useState(false);
   const [error, setError] = useState('');
   const [shake, setShake] = useState(false);
 
@@ -49,10 +50,16 @@ export default function Login({ theme, setTheme, onSignedIn }) {
   return (
     <div className="auth">
       <div className="auth-corner"><ThemeToggle theme={theme} setTheme={setTheme} /></div>
+
+      <section className="auth-hero">
+        <span className="auth-brand"><Logo size={34} /> Smart Links</span>
+        <h1>One link. Every store. Always the best one.</h1>
+        <p className="auth-lead">Share a single link. It sends each shopper to the store that’s in stock and converting best, and switches the moment that changes.</p>
+      </section>
+
       <form className={`auth-card ${shake ? 'shake' : ''}`} onSubmit={submit} onAnimationEnd={() => setShake(false)} noValidate>
-        <Logo size={52} />
-        <h1>Welcome to Smart Links</h1>
-        <p className="muted">Take a look around, or sign in to run the demo.</p>
+        <h2>Open the demo</h2>
+        <p className="muted">Take a look around, or sign in to run it yourself.</p>
 
         <button type="button" className="btn btn-primary btn-block" onClick={visit} disabled={busy || visiting}>
           {visiting ? <><Spinner size={16} label="Opening" /> Opening dashboard</> : 'Continue as visitor'}
@@ -80,6 +87,8 @@ export default function Login({ theme, setTheme, onSignedIn }) {
           {busy ? <><Spinner size={16} label="Signing in" /> Signing in</> : 'Sign in'}
         </button>
       </form>
+
+      <HeroRoute />
     </div>
   );
 }

@@ -38,7 +38,17 @@ export function LinksPage({ snap, cfgState, toast, goTo }) {
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [stockBusy, setStockBusy] = useState(null);
   const fmt = (n) => money(n, snap.currency, snap.locale);
+
+  async function toggleStock(l, st, storeName) {
+    setStockBusy(`${l.id}-${st.id}`);
+    try {
+      setCfg(await api('POST', `/api/links/${l.id}/stock`, { storeId: st.id, inStock: st.outOfStock }));
+      toast(st.outOfStock ? `${storeName} back in stock for ${l.title}` : `${storeName} marked out of stock for ${l.title}`);
+    } catch (e) { toast(e.message); }
+    finally { setStockBusy(null); }
+  }
 
   if (error) return <main className="page"><p className="form-error">{error}</p></main>;
   if (!cfg) return <div className="splash"><Spinner size={28} /></div>;
@@ -58,7 +68,7 @@ export function LinksPage({ snap, cfgState, toast, goTo }) {
       <header className="page-head">
         <div>
           <h1>Links</h1>
-          <p className="muted">One link per product. It sends each shopper to the store converting best right now.</p>
+          <p className="muted">One link per product. Tap a store to mark it out of stock, and every click moves to the next store instantly.</p>
         </div>
         <div className="head-actions">
           <button className="btn btn-gray" onClick={() => setImporting(true)}>Import links</button>
@@ -85,15 +95,20 @@ export function LinksPage({ snap, cfgState, toast, goTo }) {
               <article key={l.id} className="card link-row">
                 <div className="link-row-main">
                   <h3>{l.title}</h3>
-                  <button className="slug-copy" onClick={() => navigator.clipboard?.writeText(`https://go.creator/${l.slug}`).then(() => toast('Link copied'), () => toast('Couldn’t copy. Select the link and copy it manually.'))}>
-                    go.creator/{l.slug} <Copy />
+                  <button className="slug-copy" onClick={() => navigator.clipboard?.writeText(`${location.origin}/${l.slug}`).then(() => toast('Link copied'), () => toast('Couldn’t copy. Select the link and copy it manually.'))}>
+                    {location.host}/{l.slug} <Copy />
                   </button>
                   <div className="store-pills">
-                    {l.stores.map((st, i) => (
-                      <span key={st.id} className={`pill ${s?.active === st.id ? 'on' : ''}`} title={st.url}>
-                        {cfg.catalog.find((c) => c.id === st.id)?.name}{i === 0 && <em> fallback</em>}
-                      </span>
-                    ))}
+                    {l.stores.map((st, i) => {
+                      const storeName = cfg.catalog.find((c) => c.id === st.id)?.name;
+                      return (
+                        <button key={st.id} className={`pill pill-btn ${s?.active === st.id ? 'on' : ''} ${st.outOfStock ? 'out' : ''}`}
+                                disabled={stockBusy === `${l.id}-${st.id}`} onClick={() => toggleStock(l, st, storeName)}
+                                title={st.outOfStock ? `Mark ${storeName} back in stock` : `Mark ${storeName} out of stock for this product`}>
+                          {storeName}{st.outOfStock ? <em> out of stock</em> : i === 0 && <em> first choice</em>}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <dl className="link-row-stats">
@@ -101,6 +116,7 @@ export function LinksPage({ snap, cfgState, toast, goTo }) {
                   <div><dt>Earned</dt><dd>{fmt(earned)}</dd></div>
                 </dl>
                 <div className="link-row-actions">
+                  <a className="btn btn-small" href={`/${l.slug}`} target="_blank" rel="noopener" title="Opens the link like a shopper would">Test</a>
                   <button className="btn btn-small" onClick={() => setEditing(l)}>Edit</button>
                   <button className="icon-btn danger-icon" onClick={() => setDeleting(l)} aria-label={`Delete ${l.title}`}><Trash /></button>
                 </div>
@@ -165,14 +181,14 @@ function LinkForm({ cfg, initial, onSaved, onClose, goTo }) {
       </label>
       <label className="field">
         <span>Short link</span>
-        <span className="prefixed"><span>go.creator/</span>
+        <span className="prefixed"><span>{location.host}/</span>
           <input value={slug} onChange={(e) => { setSlug(e.target.value); setSlugTouched(true); }} placeholder="wireless-earbuds" />
         </span>
       </label>
 
       <div className="field">
         <span>Stores that sell it</span>
-        <p className="hint">Paste the product page from each store. The first store is the fallback before there’s enough data.</p>
+        <p className="hint">Paste the product page from each store, in your order of preference. Amazon and Flipkart pages get your tracking ID added automatically. For other stores, paste the affiliate link from your network (Cuelinks, Impact, CJ).</p>
         <ol className="store-rows">
           {stores.map((r, i) => (
             <li key={i}>

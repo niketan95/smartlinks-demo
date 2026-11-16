@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 // ---------- spinner (Apple-style activity indicator) ----------
 export function Spinner({ size = 18, label = 'Loading' }) {
@@ -13,7 +13,7 @@ export function Spinner({ size = 18, label = 'Loading' }) {
 const THEME_KEY = 'sl-theme';
 export function useTheme() {
   const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch { return 'auto'; }
+    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
   });
   useEffect(() => {
     const root = document.documentElement;
@@ -102,12 +102,16 @@ export const Sliders = () => <Svg><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><cir
 export const Close = () => <Svg><path d="M6 6l12 12M18 6 6 18" /></Svg>;
 export const Eye = () => <Svg><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></Svg>;
 export const EyeOff = () => <Svg><path d="M3 3l18 18M10.6 5.1A10.7 10.7 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2" /></Svg>;
-export const Logo = ({ size = 28 }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-    <rect width="32" height="32" rx="8" fill="var(--accent)" />
-    <path d="M7 16h7l5-6h6M14 16l5 6h6" stroke="#fff" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
+export const Logo = ({ size = 28 }) => {
+  const id = useId().replace(/:/g, '');
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
+      <defs><linearGradient id={id} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#4b57f0" /><stop offset="1" stopColor="#8a4dff" /></linearGradient></defs>
+      <rect width="32" height="32" rx="9" fill={`url(#${id})`} />
+      <path d="M7 16h7l5-6h6M14 16l5 6h6" stroke="#fff" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+};
 
 // ---------- modal sheet ----------
 export function Modal({ title, onClose, children, footer, wide, busy }) {

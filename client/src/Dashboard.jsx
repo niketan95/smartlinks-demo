@@ -198,7 +198,9 @@ function Content({ snap, reroutes, sales, rerouted, onReset, onManage }) {
       </header>
 
       <dl className="metrics">
-        <Metric label="Clicks" value={totals.clicks.toLocaleString()} />
+        <Metric label="Clicks" value={totals.clicks.toLocaleString()}
+          note={totals.liveClicks > 0 ? `${totals.liveClicks.toLocaleString()} from real shoppers`
+            : snap.simulated ? 'Simulated demo traffic' : null} />
         <Metric label="Conversion rate" value={pct(cr)} />
         <Metric label="Earnings" value={fmt(totals.earnings)}
           note={lift === null ? 'Comparing with fixed links…' : (
@@ -216,12 +218,20 @@ function Content({ snap, reroutes, sales, rerouted, onReset, onManage }) {
           <div className="chart">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={series} margin={{ top: 8, right: 4, left: -24, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gClicks" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={cssVar('--accent')} stopOpacity={0.5} /><stop offset="100%" stopColor={cssVar('--accent')} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={cssVar('--green-fill')} stopOpacity={0.45} /><stop offset="100%" stopColor={cssVar('--green-fill')} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
                 <XAxis dataKey="t" tickFormatter={clock} minTickGap={70} tick={{ fontSize: 11, fill: cssVar('--muted') }} axisLine={false} tickLine={false} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: cssVar('--muted') }} axisLine={false} tickLine={false} />
                 <Tooltip labelFormatter={clock}
                   contentStyle={{ background: cssVar('--elevated'), border: 'none', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.15)', color: cssVar('--ink') }} />
-                <Area type="monotone" dataKey="clicks" name="Clicks" stroke={cssVar('--accent')} strokeWidth={2} fill={cssVar('--accent')} fillOpacity={0.12} isAnimationActive={false} />
-                <Area type="monotone" dataKey="conversions" name="Sales" stroke={cssVar('--green-fill')} strokeWidth={2} fill={cssVar('--green-fill')} fillOpacity={0.25} isAnimationActive={false} />
+                <Area type="monotone" dataKey="clicks" name="Clicks" stroke={cssVar('--accent')} strokeWidth={2.5} fill="url(#gClicks)" isAnimationActive={false} />
+                <Area type="monotone" dataKey="conversions" name="Sales" stroke={cssVar('--green-fill')} strokeWidth={2.5} fill="url(#gSales)" isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -239,6 +249,7 @@ function Content({ snap, reroutes, sales, rerouted, onReset, onManage }) {
                   <time>{clock(e.at)}</time>
                   <p className="why">
                     {e.reason === 'stock' ? `${e.fromName} is out of stock`
+                      : e.reason === 'restock' ? `${e.toName} is back in stock`
                       : `${pct(e.toCr)} recent conversion vs ${pct(e.fromCr)} at ${e.fromName}`}
                   </p>
                 </li>
@@ -339,8 +350,8 @@ function LinkCard({ link, justRerouted, fmt }) {
   return (
     <article className={`card link ${justRerouted ? 'rerouted' : ''}`}>
       <h3>{link.title}</h3>
-      <span className="slug">{link.slug}</span>
-      <p className="routing">Routing to <strong>{active.name}</strong></p>
+      <span className="slug">{location.host}/{link.slug}</span>
+      <p className="routing"><span className="live-dot" aria-hidden="true" />Routing to <strong>{active.name}</strong></p>
       <div className="split" role="img" aria-label="Share of clicks by store">
         {link.stores.map((s) => (
           <span key={s.id} className={s.id === link.active ? 'on' : ''}

@@ -64,3 +64,11 @@ Set it on Render under the service's Environment tab. Sessions live in memory, s
 - **Links:** create, edit and delete smart links; import the affiliate links a creator already uses (store is detected from the URL, or picked manually for Linktree, Wishlink, LTK or bit.ly links).
 
 Everything is kept in memory, so links and connections go back to the sample set when the server restarts.
+
+## Real links (pilot mode)
+
+Every link works at `https://<your-site>/<short-name>` (also `/r/<short-name>`). It sends the shopper to the first in-stock store in the creator's order, adding their Amazon `tag` or Flipkart `affid` to plain store pages. Links from networks (Cuelinks, Impact, CJ) are passed through unchanged.
+
+On the Links page, tap a store to mark it out of stock for that product; every click moves to the next store instantly. Learned routing switches on only once a link has sales data.
+
+For real pilots, set `DEMO_TRAFFIC` to `0` on Render so the numbers are real clicks only.

@@ -42,7 +42,7 @@ function makeLink({ title, slug, stores }) {
 function resetStats() {
   state.pending = new Map();
   state.unavailable = {};
-  state.totals = { clicks: 0, conversions: 0, earnings: 0, baseline: 0, reroutes: 0 };
+  state.totals = { clicks: 0, liveClicks: 0, conversions: 0, earnings: 0, baseline: 0, reroutes: 0 };
   state.series = [];
   for (const l of state.links) {
     l.active = l.stores[0];
@@ -52,7 +52,7 @@ function resetStats() {
 
 function seedRegion(id) {
   const r = REGIONS[id];
-  state = { region: id, links: r.seed.map(makeLink), connections: {} };
+  state = { region: id, links: r.seed.map(makeLink), connections: {}, linkOut: {} }; // linkOut: linkId -> { storeId: true }
   for (const l of state.links) for (const s of l.stores) state.connections[s] = r.stores[s].sampleTag;
   resetStats();
 }
@@ -82,26 +82,31 @@ function snapshot() {
   bucket();
   return {
     type: 'snapshot',
-    region: state.region, currency: region().currency, locale: region().locale,
+    region: state.region, currency: region().currency, locale: region().locale, simulated: process.env.DEMO_TRAFFIC === '1',
     totals: state.totals,
     series: state.series,
     autoEvents,
     stores: usedStoreIds().map((id) => ({ id, name: store(id).name, outOfStock: !!state.unavailable[id] })),
     links: state.links.map((l) => ({
-      id: l.id, title: l.title, slug: `go.creator/${l.slug}`, active: l.active,
+      id: l.id, title: l.title, slug: l.slug, active: l.active,
       stores: l.stores.map((id) => {
         const s = l.stats[id];
         return { id, name: store(id).name, clicks: s.clicks, conversions: s.conversions, earnings: s.earnings,
-                 recentCr: recentCr(s), outOfStock: !!state.unavailable[id] };
+                 recentCr: recentCr(s), outOfStock: isOut(l, id) };
       }),
     })),
   };
 }
 
 // --- dynamic routing ---
-const available = (link) => link.stores.filter((s) => !state.unavailable[s]);
+const isOut = (link, s) => !!(state.unavailable[s] || state.linkOut[link.id]?.[s]);
+const available = (link) => link.stores.filter((s) => !isOut(link, s));
+// Rate-based learning needs sales data. Until a link has reported sales, it simply uses
+// the first in-stock store in the creator's order, so real clicks never flip-flop on noise.
+const learning = (link) => Object.values(link.stats).some((s) => s.conversions > 0);
 
 function pickStore(link) {
+  if (!learning(link)) return { storeId: link.active, explore: false };
   const others = available(link).filter((s) => s !== link.active);
   if (others.length && Math.random() < EPSILON) return { storeId: others[Math.floor(Math.random() * others.length)], explore: true };
   return { storeId: link.active, explore: false };
@@ -119,6 +124,11 @@ function reroute(link, to, reason) {
 function evaluate(link) {
   const avail = available(link);
   if (!avail.length) return;
+  if (!learning(link)) {
+    if (isOut(link, link.active)) return reroute(link, avail[0], 'stock');
+    if (link.active !== avail[0]) return reroute(link, avail[0], 'restock');
+    return;
+  }
   const best = avail.reduce((a, b) => (recentCr(link.stats[b]) > recentCr(link.stats[a]) ? b : a));
   if (state.unavailable[link.active]) return reroute(link, best, 'stock');
   if (best !== link.active && link.stats[best].wClicks >= MIN_STORE_CLICKS &&
@@ -185,22 +195,41 @@ app.get('/api/stream', requireAuth, (req, res) => {
   req.on('close', () => clients.delete(res));
 });
 
-app.post('/api/click', (req, res) => {
-  const link = state.links.find((l) => l.id === req.body?.linkId);
-  if (!link) return res.status(404).json({ error: 'Unknown linkId' });
-
+function recordClick(link, live) {
+  evaluate(link); // make sure stock changes apply before choosing
   const { storeId, explore } = pickStore(link);
   for (const s of Object.values(link.stats)) { s.wClicks *= DECAY; s.wConv *= DECAY; }
   const st = link.stats[storeId];
   st.clicks++; st.wClicks++;
   state.totals.clicks++; bucket().clicks++;
+  if (live) state.totals.liveClicks++;
 
   const clickId = `c${++clickCounter}`;
   state.pending.set(clickId, { linkId: link.id, storeId });
   if (state.pending.size > 5000) state.pending.delete(state.pending.keys().next().value);
-
   evaluate(link);
-  res.json({ clickId, storeId, explore, url: link.urls[storeId] });
+  return { clickId, storeId, explore };
+}
+
+// The creator's own ID goes on plain Amazon and Flipkart pages. Network links
+// (Cuelinks, Impact, CJ) and affiliate short links are passed through unchanged.
+function destination(link, storeId) {
+  const raw = link.urls[storeId];
+  const def = store(storeId), tag = state.connections[storeId];
+  try {
+    const u = new URL(raw);
+    const mainDomain = def.domains[0];
+    const onStore = u.hostname === mainDomain || u.hostname.endsWith(`.${mainDomain}`);
+    if (def.tagParam && tag && onStore && !u.searchParams.has(def.tagParam)) u.searchParams.set(def.tagParam, tag);
+    return u.toString();
+  } catch { return raw; }
+}
+
+app.post('/api/click', (req, res) => {
+  const link = state.links.find((l) => l.id === req.body?.linkId);
+  if (!link) return res.status(404).json({ error: 'Unknown linkId' });
+  const { clickId, storeId, explore } = recordClick(link, false);
+  res.json({ clickId, storeId, explore, url: destination(link, storeId) });
 });
 
 app.post('/api/conversion', (req, res) => {
@@ -236,16 +265,18 @@ function config() {
       inUse: used.has(id),
     })),
     links: state.links.map((l) => ({ id: l.id, title: l.title, slug: l.slug,
-                                     stores: l.stores.map((id) => ({ id, url: l.urls[id] })) })),
+                                     stores: l.stores.map((id) => ({ id, url: l.urls[id], outOfStock: isOut(l, id) })) })),
   };
 }
 
+const RESERVED = new Set(['api', 'assets', 'r', 'links', 'connections', 'login', 'favicon.ico']);
 function validLink(body, exceptId) {
   const title = String(body?.title || '').trim();
   const slug = String(body?.slug || '').trim().toLowerCase();
   const stores = Array.isArray(body?.stores) ? body.stores : [];
   if (!title) return { error: 'Add a product name.' };
   if (!/^[a-z0-9-]{2,40}$/.test(slug)) return { error: 'Short link name can use lowercase letters, numbers and dashes (2 to 40 characters).' };
+  if (RESERVED.has(slug)) return { error: `“${slug}” is reserved. Try another name.` };
   if (state.links.some((l) => l.slug === slug && l.id !== exceptId)) return { error: `go.creator/${slug} is already taken.` };
   if (stores.length < 2) return { error: 'Add at least two stores so the link has somewhere to switch to.' };
   const seen = new Set();
@@ -313,9 +344,23 @@ app.put('/api/links/:id', requireOwner, (req, res) => {
   res.json(config());
 });
 
+// Mark one store out of stock (or back in stock) for one product
+app.post('/api/links/:id/stock', requireOwner, (req, res) => {
+  const link = state.links.find((l) => l.id === req.params.id);
+  const { storeId, inStock } = req.body || {};
+  if (!link || !link.stores.includes(storeId)) return res.status(404).json({ error: 'That link or store no longer exists.' });
+  state.linkOut[link.id] ??= {};
+  if (inStock) delete state.linkOut[link.id][storeId];
+  else state.linkOut[link.id][storeId] = true;
+  evaluate(link);
+  send(snapshot());
+  res.json(config());
+});
+
 app.delete('/api/links/:id', requireOwner, (req, res) => {
   const i = state.links.findIndex((l) => l.id === req.params.id);
   if (i < 0) return res.status(404).json({ error: 'That link no longer exists.' });
+  delete state.linkOut[state.links[i].id];
   state.links.splice(i, 1);
   send(snapshot());
   res.json(config());
@@ -361,6 +406,15 @@ app.get('/api/sim/poll', (_req, res) => {
 // --- serve the built dashboard (production) ---
 const dist = path.join(__dirname, '../client/dist');
 app.use(express.static(dist));
+// --- the smart link itself: /earbuds or /r/earbuds sends a real shopper to the best store ---
+app.get(['/r/:slug', '/:slug'], (req, res, next) => {
+  const link = state.links.find((l) => l.slug === req.params.slug.toLowerCase());
+  if (!link) return next();
+  const { storeId } = recordClick(link, true);
+  res.set('Cache-Control', 'no-store');
+  res.redirect(302, destination(link, storeId));
+});
+
 app.get('*', (_req, res, next) => res.sendFile(path.join(dist, 'index.html'), (err) => err && next()));
 
 setInterval(() => send(snapshot()), 1000);

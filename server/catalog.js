@@ -1,6 +1,6 @@
 // Demo store catalog per region. Commission rates are sample values for the demo, not quoted program rates.
-const s = (name, program, network, commission, domains, tagLabel, sampleTag) =>
-  ({ name, program, network, commission, domains, tagLabel, sampleTag });
+const s = (name, program, network, commission, domains, tagLabel, sampleTag, tagParam = null) =>
+  ({ name, program, network, commission, domains, tagLabel, sampleTag, tagParam });
 
 const url = (host, path) => `https://${host}/${path}`;
 
@@ -8,7 +8,7 @@ export const REGIONS = {
   us: {
     label: 'United States', currency: 'USD', locale: 'en-US', orderRange: [20, 250],
     stores: {
-      amazon:  s('Amazon', 'Amazon Associates', 'Direct', 0.04, ['amazon.com', 'amzn.to'], 'Associates tracking ID', 'creator-20'),
+      amazon:  s('Amazon', 'Amazon Associates', 'Direct', 0.04, ['amazon.com', 'amzn.to'], 'Associates tracking ID', 'creator-20', 'tag'),
       bestbuy: s('Best Buy', 'Best Buy Affiliate', 'Impact', 0.05, ['bestbuy.com', 'bby.us'], 'Impact partner ID', 'IR-2841907'),
       target:  s('Target', 'Target Partners', 'Impact', 0.06, ['target.com', 'goto.target.com'], 'Impact partner ID', 'IR-7730215'),
       walmart: s('Walmart', 'Walmart Creator', 'Impact', 0.045, ['walmart.com', 'goto.walmart.com'], 'Impact partner ID', 'IR-5518842'),
@@ -38,8 +38,8 @@ export const REGIONS = {
   in: {
     label: 'India', currency: 'INR', locale: 'en-IN', orderRange: [499, 14999],
     stores: {
-      amazonin: s('Amazon.in', 'Amazon Associates India', 'Direct', 0.05, ['amazon.in', 'amzn.in', 'amzn.to'], 'Associates tracking ID', 'creator-21'),
-      flipkart: s('Flipkart', 'Flipkart Affiliate', 'Direct', 0.06, ['flipkart.com', 'fkrt.it', 'fkrt.cc'], 'Affiliate ID', 'creatorfk'),
+      amazonin: s('Amazon.in', 'Amazon Associates India', 'Direct', 0.05, ['amazon.in', 'amzn.in', 'amzn.to'], 'Associates tracking ID', 'creator-21', 'tag'),
+      flipkart: s('Flipkart', 'Flipkart Affiliate', 'Direct', 0.06, ['flipkart.com', 'fkrt.it', 'fkrt.cc'], 'Affiliate ID', 'creatorfk', 'affid'),
       myntra:   s('Myntra', 'Myntra', 'Cuelinks', 0.08, ['myntra.com', 'myntr.it'], 'Cuelinks channel ID', 'CL-48213'),
       ajio:     s('Ajio', 'Ajio', 'Cuelinks', 0.09, ['ajio.com', 'ajiio.co'], 'Cuelinks channel ID', 'CL-48213'),
       croma:    s('Croma', 'Croma', 'Cuelinks', 0.03, ['croma.com'], 'Cuelinks channel ID', 'CL-48213'),
